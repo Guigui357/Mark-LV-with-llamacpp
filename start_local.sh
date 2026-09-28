@@ -13,4 +13,4 @@ exec llama serve \
   --port 8080 \
   -c 4096 \
   -np 1 \
-  -ngl 0
+  --device none
