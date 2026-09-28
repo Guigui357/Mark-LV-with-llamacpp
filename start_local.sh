@@ -3,7 +3,7 @@ set -e
 
 MODEL="${MARK_LIV_MODEL:-Qwen/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M}"
 
-echo "[Mark-LIV] Starting local llama.cpp server (CPU)..."
+echo "[Mark-LIV] Starting local llama.cpp server (CPU-only)..."
 
 exec llama serve \
   -hf "$MODEL" \
