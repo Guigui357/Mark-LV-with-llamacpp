@@ -121,7 +121,7 @@ def main() -> None:
 
     print("\n✅ Setup complete!")
     print("   1) Launch it:  python main.py")
-    print("   2) Paste your free Gemini API key when the setup screen appears.")
+    print("   2) Start the local llama.cpp server: ./start_local.sh (or start_local.bat).")
     print("   3) (Optional) Enable 'Hey Jarvis' from ⚙ → WAKE WORD.")
 
 

@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import platform as _platform
 import subprocess as _subprocess
 
@@ -105,7 +104,7 @@ PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
 #
 # It is reassigned on every connect, so a model that runs out of quota is
 # stepped over and the assistant keeps talking instead of failing to start.
-LIVE_MODEL          = "models/gemini-3.1-flash-live-preview"
+LIVE_MODEL          = local_model()
 CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000 
 RECEIVE_SAMPLE_RATE = 24000
@@ -958,173 +957,7 @@ class JarvisLive:
         self.ui.write_log(f"ERR: {tool_name} — {short}")
         self.speak(f"Sir, {tool_name} encountered an error. {short}")
 
-    def _build_config(self) -> types.LiveConnectConfig:
-        from datetime import datetime
-
-        # Load customization from config
-        try:
-            _cfg = json.loads(open(API_CONFIG_PATH, encoding="utf-8").read())
-            self._asst_name = (_cfg.get("assistant_name") or "JARVIS").strip()
-            _user_name = (_cfg.get("user_name") or "").strip()
-        except Exception:
-            self._asst_name = "JARVIS"
-            _user_name = ""
-
-        memory     = load_memory()
-        mem_str    = format_memory_for_prompt(memory)
-        sys_prompt = _load_system_prompt()
-
-        now      = datetime.now()
-        time_str = now.strftime("%A, %B %d, %Y — %I:%M %p")
-        time_ctx = (
-            f"[CURRENT DATE & TIME]\n"
-            f"Right now it is: {time_str}\n"
-            f"Use this to calculate exact times for reminders.\n\n"
-        )
-
-        # Identity injection — overrides any hardcoded name in prompt.txt
-        # Address form is a property of the language being spoken, so it is
-        # stated as a principle rather than a two-language lookup — the model
-        # already knows the respectful register of whatever language it is in.
-        _addr = (f"ADDRESS: Always call the user '{_user_name}'."
-                 if _user_name
-                 else 'ADDRESS: Address the user with the ordinary respectful form '
-                      'for a superior in the language you are currently speaking — '
-                      '"sir" in English, its everyday equivalent in any other '
-                      'language. Never an archaic or aristocratic form, and never '
-                      'the form from a different language than the one you are '
-                      'speaking in this sentence.')
-        identity_ctx = (
-            f"[IDENTITY]\n"
-            f"Your name is {self._asst_name}. "
-            f"Always refer to yourself as {self._asst_name}.\n"
-            f"{_addr}\n\n"
-        )
-
-        # Everything the model is told about *itself* is derived here, not
-        # written into prompt.txt: the name comes from config, the platform from
-        # the host, the capability list from the registries that were just
-        # discovered. Rename the assistant, add a plugin or move to another OS
-        # and this follows without anyone editing a prompt.
-        _all_decls = (TOOL_DECLARATIONS
-                      + self._action_registry.get_tool_declarations()
-                      + self._plugin_registry.get_tool_declarations())
-        _names = {(d.get("name") if isinstance(d, dict) else getattr(d, "name", ""))
-                  for d in _all_decls}
-        sys_prompt = _render_prompt(sys_prompt, {
-            "assistant_name": self._asst_name,
-            "platform": f"{_platform.system()} {_platform.release()}".strip(),
-            "capabilities": _describe_tools(_all_decls),
-            "limits": _describe_limits(
-                has_vision="screen_process" in _names,
-                has_mic=True,
-            ),
-        })
-
-        parts = [time_ctx, identity_ctx]
-        if mem_str:
-            parts.append(mem_str)
-        parts.append(sys_prompt)
-
-        cfg = dict(
-            response_modalities=["AUDIO"],
-            output_audio_transcription={},
-            input_audio_transcription={},
-            system_instruction="\n".join(parts),
-            tools=[{"function_declarations": _all_decls}],
-            # Asks the server to issue session-resumption handles. Enabled but
-            # NOT yet used: no handle is captured from the resumption update and
-            # none is passed back here, so a reconnect starts a fresh session
-            # rather than continuing the old one. Left on because the handles
-            # cost nothing and are the prerequisite for doing it properly.
-            # Hand back the handle captured from the last session_resumption
-            # update. `handle=None` is exactly the old behaviour (ask for
-            # handles, start fresh), so the first connect of a run is unchanged.
-            session_resumption=types.SessionResumptionConfig(
-                handle=self._resume_handle
-            ),
-            # Sliding-window compression: session never dies from a full context
-            # window — JARVIS can stay in one conversation for hours
-            context_window_compression=types.ContextWindowCompressionConfig(
-                sliding_window=types.SlidingWindow(),
-            ),
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=get_voice()
-                    )
-                )
-            ),
-        )
-        if self._enhanced_live:
-            # Proactive audio: JARVIS stays silent when speech isn't addressed
-            # to it (background chatter, talking to someone else in the room).
-            # (Affective dialog was dropped: gemini-3.1-flash-live does not
-            #  support it, and it never reliably detected tone in practice.
-            #  To restore it on a 2.5 native-audio model, add back:
-            #  cfg["enable_affective_dialog"] = True )
-            if get_proactive_audio_enabled():
-                cfg["proactivity"] = types.ProactivityConfig(proactive_audio=True)
-
-        if self._tuned_live:
-            cfg.update(self._tuning_config())
-
-        return types.LiveConnectConfig(**cfg)
-
-    def _tuning_config(self) -> dict:
-        """The optional knobs, kept apart so one bad field can be dropped wholesale.
-
-        Every one of these is a preview-API field. If a future model release
-        stops accepting any of them the connection fails at setup, so the run
-        loop turns `_tuned_live` off and reconnects on the plain config rather
-        than leaving the user with an assistant that will not start.
-        """
-        out: dict = {}
-
-        # How long the server waits through a pause before deciding your turn is
-        # over. This — not the size of the prompt — is what most of the delay
-        # before a reply actually is, and the default has to suit everybody, so
-        # it is necessarily cautious.
-        turn = get_turn_tuning()
-        if turn.get("enabled", True):
-            detect = types.AutomaticActivityDetection(
-                silence_duration_ms=turn["silence_ms"],
-                prefix_padding_ms=turn["prefix_ms"],
-            )
-            if turn["end_sensitivity"] == "high":
-                detect.end_of_speech_sensitivity = types.EndSensitivity.END_SENSITIVITY_HIGH
-            elif turn["end_sensitivity"] == "low":
-                detect.end_of_speech_sensitivity = types.EndSensitivity.END_SENSITIVITY_LOW
-            if turn["start_sensitivity"] == "high":
-                detect.start_of_speech_sensitivity = types.StartSensitivity.START_SENSITIVITY_HIGH
-            elif turn["start_sensitivity"] == "low":
-                detect.start_of_speech_sensitivity = types.StartSensitivity.START_SENSITIVITY_LOW
-            out["realtime_input_config"] = types.RealtimeInputConfig(
-                automatic_activity_detection=detect)
-
-        # Screenshots and camera frames are tokenised at this resolution and then
-        # stay in the session's context. 'medium' keeps on-screen text legible
-        # for a fraction of a full-resolution frame.
-        res = get_media_resolution()
-        if res != "default":
-            out["media_resolution"] = {
-                "low":    types.MediaResolution.MEDIA_RESOLUTION_LOW,
-                "medium": types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
-                "high":   types.MediaResolution.MEDIA_RESOLUTION_HIGH,
-            }[res]
-
-        # Thinking is left at the server default deliberately. Forcing the budget
-        # to zero was measured on gemini-3.1-flash-live over interleaved trials
-        # and did not make the first word arrive sooner — this model does not
-        # appear to deliberate on the Live path, so pinning the field only adds a
-        # way for a future release to behave differently. Set "thinking_enabled"
-        # in config/api_keys.json to true to let it reason instead.
-        if get_thinking_enabled():
-            out["thinking_config"] = types.ThinkingConfig(thinking_budget=-1)
-
-        return out
-
-    async def _execute_tool(self, fc) -> types.FunctionResponse:
+    async def _execute_tool(self, fc) -> SimpleNamespace:
         name = fc.name
         args = dict(fc.args or {})
 
@@ -1141,7 +974,7 @@ class JarvisLive:
                 print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
             if not self.ui.muted:
                 self.ui.set_state("LISTENING")
-            return types.FunctionResponse(
+            return SimpleNamespace(
                 id=fc.id, name=name,
                 response={"result": "ok", "silent": True}
             )
@@ -1286,7 +1119,7 @@ class JarvisLive:
         _sched = (self._action_registry.scheduling(name)
                   or self._plugin_registry.scheduling(name))
         _extra = {"scheduling": _sched} if _sched else {}
-        return types.FunctionResponse(
+        return SimpleNamespace(
             id=fc.id, name=name,
             response={"result": result},
             **_extra
@@ -1471,133 +1304,111 @@ class JarvisLive:
         return True
 
     async def _receive_audio(self):
-        print("[JARVIS] 👂 Recv started")
-        out_buf, in_buf = [], []
+        """Consume local llama.cpp responses, execute tools, and speak replies locally."""
+        if not self.session:
+            return
 
+        while self.session and not self.session.closed:
+            try:
+                response = await self.session.receive()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.ui.write_log(f"ERR: Local receive: {e}")
+                await asyncio.sleep(0.2)
+                continue
+
+            # LocalSession emits function calls in the same shape the old
+            # receive loop expected from the Live API.
+            tool_call = getattr(response, "tool_call", None)
+            if tool_call is not None:
+                calls = getattr(tool_call, "function_calls", []) or []
+                results = []
+                for fc in calls:
+                    try:
+                        results.append(await self._execute_tool(fc))
+                    except Exception as e:
+                        print(f"[JARVIS] Tool execution error: {e}")
+                        traceback.print_exc()
+                        results.append(SimpleNamespace(
+                            id=getattr(fc, "id", ""),
+                            name=getattr(fc, "name", ""),
+                            response={"result": f"Tool failed: {e}"},
+                        ))
+                if self.session and results:
+                    await self.session.send_tool_response(results)
+                continue
+
+            server_content = getattr(response, "server_content", None)
+            if server_content is None:
+                continue
+
+            output = getattr(server_content, "output_transcription", None)
+            text = _clean_transcript(getattr(output, "text", "") if output else "")
+            if text:
+                self._session_log.append(f"JARVIS: {text}")
+                self.ui.write_log(f"JARVIS: {text}")
+                self.ui.set_state("SPEAKING")
+                try:
+                    self.ui.write_log(
+                        "TTS: Piper" if local_tts_backend() == "Piper" else "TTS: fallback"
+                    )
+                    await asyncio.to_thread(speak_local, text)
+                except Exception as e:
+                    self.ui.write_log(f"ERR: TTS local: {e}")
+                finally:
+                    if self.session and not self.ui.muted:
+                        self.ui.set_state("LISTENING")
+
+            if getattr(server_content, "turn_complete", False):
+                self._turn_done_event.set()
+
+    async def _listen_local_audio(self):
+        """Capture microphone audio locally and transcribe with whisper.cpp."""
+        from core.local_stt import LocalMic, transcribe
+
+        mic = LocalMic(
+            wake_enabled=self._wake_enabled,
+            wake_detector=self._wake_detector,
+            awake=self._awake,
+        )
         try:
-            while True:
-                async for response in self.session.receive():
+            name = await asyncio.to_thread(mic.open)
+            self.ui.write_log(f"SYS: Microfone local ativo: {name or 'sistema padrão'}")
+            while self.session:
+                mic.awake = self._awake
+                mic.wake_enabled = self._wake_enabled
 
-                    # ── Session resumption ───────────────────────────────────
-                    # The server sends this periodically. `resumable` goes false
-                    # while a turn is mid-flight — replaying a handle from that
-                    # moment is what the flag exists to prevent — so only
-                    # resumable handles are kept. This is three lines and it is
-                    # the entire fix for "every reconnect forgets everything".
-                    _sru = getattr(response, "session_resumption_update", None)
-                    if _sru is not None:
-                        if getattr(_sru, "resumable", False) and getattr(_sru, "new_handle", None):
-                            if self._resume_handle is None:
-                                print("[JARVIS] 🔗 Session resumption armed")
-                            self._resume_handle = _sru.new_handle
+                if self._ptt_enabled and not self._ptt_held:
+                    await asyncio.sleep(0.05)
+                    continue
 
-                    if response.data:
-                        if self._interrupted:
-                            pass  # discard: interrupted
-                        else:
-                            if self._turn_done_event and self._turn_done_event.is_set():
-                                self._turn_done_event.clear()
-                            # Split into ~50 ms chunks so interrupt() stops audio within 50 ms
-                            # (24000 Hz × 2 bytes/sample × 0.05 s = 2400 bytes per slice)
-                            _audio_data = response.data
-                            _SLICE = 2400
-                            for _i in range(0, len(_audio_data), _SLICE):
-                                self.audio_in_queue.put_nowait(_audio_data[_i : _i + _SLICE])
+                pcm = await asyncio.to_thread(mic.read_segment)
+                if not pcm or not self.session:
+                    continue
 
-                    if response.server_content:
-                        sc = response.server_content
+                try:
+                    text = await asyncio.to_thread(transcribe, pcm)
+                except Exception as e:
+                    self.ui.write_log(f"ERR: STT local: {e}")
+                    continue
 
-                        if sc.output_transcription and sc.output_transcription.text:
-                            txt = _clean_transcript(sc.output_transcription.text)
-                            # A turn that involves a tool call passes through
-                            # several turn_completes, and the API re-sends the
-                            # tail of the transcript across them. Comparing only
-                            # against the previous chunk missed that — once
-                            # out_buf had been flushed and emptied, the repeat
-                            # sailed straight back in, which logged the answer
-                            # twice AND made the avatar mouth it twice.
-                            if txt and not _is_repeat_chunk(txt, out_buf):
-                                out_buf.append(txt)
-                                # Hand the words to the mouth as they arrive, so
-                                # the avatar can form the consonants the audio
-                                # alone cannot show. Pure string work — it adds
-                                # nothing measurable to the response path.
-                                self._visemes.feed_text(txt)
+                text = " ".join(text.split()).strip()
+                if not text:
+                    continue
 
-                        if sc.input_transcription and sc.input_transcription.text:
-                            txt = _clean_transcript(sc.input_transcription.text)
-                            if txt:
-                                in_buf.append(txt)
-                                self._last_user_speech = time.monotonic()
+                self._last_user_speech = time.monotonic()
+                self.ui.set_audio_level(0.0)
+                self.ui.write_log(f"STT local: {text}")
 
-                        if sc.turn_complete:
-                            if self._turn_done_event:
-                                self._turn_done_event.set()
-
-                            # If this turn_complete ends an interrupted response, clear the
-                            # flag and skip all further processing for that turn.
-                            if self._interrupted:
-                                self._interrupted = False
-                                in_buf  = []
-                                out_buf = []
-                                self._visemes.reset()
-                                continue
-
-                            full_in = " ".join(in_buf).strip()
-                            if full_in:
-                                self._last_out_logged = ""   # new exchange
-                                self.ui.write_log(f"You: {full_in}")
-                                self._session_log.append(f"User: {full_in}")
-                                if self._dashboard:
-                                    asyncio.create_task(self._dashboard.broadcast({
-                                        "type": "log", "speaker": "user",
-                                        "text": full_in,
-                                        "ts": datetime.now().isoformat(),
-                                    }))
-                            in_buf = []
-
-                            full_out = " ".join(out_buf).strip()
-                            # Second line of defence: even if a repeat slips
-                            # into a *fresh* buffer after a flush, never log the
-                            # same answer (or a tail of it) twice in a row.
-                            if full_out and len(full_out) >= _REPEAT_MIN and self._last_out_logged:
-                                if full_out in self._last_out_logged:
-                                    full_out = ""
-                            if full_out:
-                                self._last_out_logged = full_out
-                                self.ui.write_log(f"{self._asst_name}: {full_out}")
-                                self._session_log.append(f"{self._asst_name}: {full_out}")
-                                if self._dashboard:
-                                    asyncio.create_task(self._dashboard.broadcast({
-                                        "type": "log", "speaker": "jarvis",
-                                        "text": full_out,
-                                        "ts": datetime.now().isoformat(),
-                                    }))
-                            out_buf = []
-
-                            if self._vision_close_pending:
-                                # This turn_complete IS the vision answer — close camera + release busy flag
-                                self._vision_close_pending = False
-                                self._vision_busy = False
-                                async def _cam_close():
-                                    await asyncio.sleep(2.0)
-                                    self.ui.stop_camera_stream()
-                                asyncio.create_task(_cam_close())
-
-                    if response.tool_call:
-                        fn_responses = []
-                        for fc in response.tool_call.function_calls:
-                            print(f"[JARVIS] 📞 {fc.name}")
-                            fr = await self._execute_tool(fc)
-                            fn_responses.append(fr)
-                        await self.session.send_tool_response(
-                            function_responses=fn_responses
-                        )
-                        await self._flush_pending_vision()
-        except Exception as e:
-            print(f"[JARVIS] ❌ Recv: {e}")
-            traceback.print_exc()
-            raise
+                # Everything after transcription remains inside the machine:
+                # LocalSession -> llama serve -> local tools.
+                await self.session.send_client_content(
+                    turns={"role": "user", "parts": [{"text": text}]},
+                    turn_complete=True,
+                )
+        finally:
+            await asyncio.to_thread(mic.close)
 
     async def _play_audio(self):
         print("[JARVIS] 🔊 Play started")
@@ -2056,277 +1867,226 @@ class JarvisLive:
 
     # ── main loop ───────────────────────────────────────────────────────────
 
-    async def run(self):
+    async def _run_local(self):
+        """Run Mark-LIV entirely against the local llama.cpp server."""
         self._loop = asyncio.get_event_loop()
         self._reconnect_event = asyncio.Event()
 
-        # ── Wire the shared core services to the interface ───────────────────
-        # The confirmation gate is useless without a way to ask, and a memory
-        # trim is invisible without a way to say so. Both are bound once here
-        # rather than passed down through every action signature.
         confirm_gate.bind(
-            show = self.ui.show_confirm,
-            hide = self.ui.hide_confirm,
-            log  = self.ui.write_log,
+            show=self.ui.show_confirm, hide=self.ui.hide_confirm, log=self.ui.write_log
         )
         set_trim_notifier(self.ui.write_log)
 
-        # Tell the device picker the exact rates the streams open at, from the
-        # constants that actually open them — so it can never list a device that
-        # cannot be opened at them.
-        audio_devices.configure(SEND_SAMPLE_RATE, RECEIVE_SAMPLE_RATE)
+        all_decls = (
+            TOOL_DECLARATIONS
+            + self._action_registry.get_tool_declarations()
+            + self._plugin_registry.get_tool_declarations()
+        )
 
-        # Enumerate audio devices off-thread. The settings drawer must never pay
-        # for host-API enumeration on the Qt thread.
-        audio_devices.prefetch()
-
-        # Start dashboard (optional — needs: pip install fastapi "uvicorn[standard]" cryptography)
+        system_prompt = _load_system_prompt()
         try:
-            from dashboard.server import DashboardServer
-            self._dashboard = DashboardServer()
-            self._dashboard.set_connect_callback(self._on_phone_connected)
-            asyncio.create_task(self._dashboard.serve())
-            # Runs for the whole lifetime, not just inside an active session
-            asyncio.create_task(self._process_dashboard_commands())
-        except Exception as e:
-            print(f"[Dashboard] Disabled: {e}")
-            self._dashboard = None
+            cfg = json.loads(API_CONFIG_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            cfg = {}
+        self._asst_name = (cfg.get("assistant_name") or "JARVIS").strip() or "JARVIS"
+        user_name = (cfg.get("user_name") or "").strip()
+        names = [str(d.get("name")) for d in all_decls if isinstance(d, dict) and d.get("name")]
+        capabilities = ", ".join(names[:32])
+        system_prompt = _render_prompt(system_prompt, {
+            "assistant_name": self._asst_name,
+            "platform": f"{_platform.system()} {_platform.release()}".strip(),
+            "capabilities": capabilities,
+            "limits": "Only act through local tools. Vision is available only when a tool supplies an image.",
+        })
+        if user_name:
+            system_prompt += f"\nAlways address the user as {user_name}."
 
-        while True:
-            try:
-                print("[JARVIS] Connecting...")
-                self.ui.set_state("THINKING")
-                # Pick the rung to open the conversation on. A model resting
-                # off a quota limit is skipped; the name is published back to
-                # LIVE_MODEL so plugins follow whatever is actually in use.
-                global LIVE_MODEL
-                LIVE_MODEL = _gemini.live_model()
-                live_model = LIVE_MODEL
-                print(f"[JARVIS] Live model: {live_model}")
-
-                _resumed_with = self._resume_handle is not None
-                config = self._build_config()
-
-                # Fresh client on every reconnect — avoids stale HTTP session state
-                # v1alpha carries proactive audio; if it gets rejected we fall
-                # back to v1beta.
-                client = genai.Client(
-                    api_key=_get_api_key(),
-                    http_options={"api_version": "v1alpha" if self._enhanced_live else "v1beta"}
-                )
-
-                async with (
-                    client.aio.live.connect(model=live_model, config=config) as session,
-                    asyncio.TaskGroup() as tg,
-                ):
-                    self.session          = session
-                    self.audio_in_queue   = asyncio.Queue()
-                    self.out_queue        = asyncio.Queue(maxsize=200)
-                    self._turn_done_event = asyncio.Event()
-
-                    # Reset transient state that must not carry over from a previous session
-                    self._pending_vision       = None
-                    self._vision_cam_active    = False
-                    self._vision_close_pending = False
-                    self._vision_busy          = False
-                    self._vision_last_time     = 0.0
-                    self._interrupted          = False
-
-                    print("[JARVIS] Connected.")
-                    if _resumed_with:
-                        # Say it plainly: the difference between "it reconnected"
-                        # and "it reconnected and still knows what we were doing"
-                        # is the whole point, and it is invisible otherwise.
-                        self.ui.write_log("SYS: Reconnected — conversation restored.")
-
-                    # Wake word: if enabled, come up ASLEEP (mic gated, silent)
-                    # until the user says "Hey Jarvis" or taps wake in the UI.
-                    if self._wake_enabled:
-                        self._ensure_wake_detector()
-                        self._awake = False
-                        self.ui.set_state("SLEEPING")
-                        self.ui.write_log("SYS: JARVIS online — sleeping. Say 'Hey Jarvis' to wake me.")
-                    else:
-                        self._awake = True
-                        self.ui.set_state("LISTENING")
-                        self.ui.write_log("SYS: JARVIS online.")
-
-                    if self._dashboard:
-                        await self._dashboard.broadcast({"type": "status", "state": "active"})
-
-                    self._reconnect_event.clear()  # ignore requests from before this session
-                    tg.create_task(self._watch_reconnect())
-                    tg.create_task(self._send_realtime())
-                    tg.create_task(self._listen_audio())
-                    tg.create_task(self._receive_audio())
-                    tg.create_task(self._play_audio())
-                    tg.create_task(self._run_system_monitor())
-                    tg.create_task(self._run_background_monitor())
-                    tg.create_task(self._run_proactive_mode())
-                    tg.create_task(self._run_sleep_watch())
-                    if self._dashboard:
-                        tg.create_task(self._relay_phone_audio())
-
-                    # Morning briefing — fires once per process launch (if enabled).
-                    # Skipped in wake-word mode: it comes up asleep, and a briefing
-                    # would mean talking while "asleep".
-                    if not self._briefing_sent and get_brief_enabled() and self._awake:
-                        self._briefing_sent = True
-                        tg.create_task(self._send_startup_briefing())
-
-            except KeyboardInterrupt:
-                raise
-            except SystemExit:
-                raise
-            except BaseException as e:
-                # Catches both Exception and BaseExceptionGroup (Python 3.11+
-                # TaskGroup raises BaseExceptionGroup when tasks are cancelled
-                # externally, which `except Exception` would miss, letting the
-                # exception escape the while-loop and causing asyncio.run() to
-                # start shutdown — resulting in "executor after shutdown" errors).
-                # Voluntary reconnect (voice change) — not an error. Rebuild the
-                # session immediately with no backoff and no scary logs.
-                if _is_reconnect_signal(e):
-                    print("[JARVIS] Voluntary reconnect requested.")
-                    if not _keep_context_of(e):
-                        # A deliberate clean slate (voice change) — drop the
-                        # handle so the next connect really does start empty.
-                        self._resume_handle = None
-                    self._conn_backoff = 0
-                    continue
-
-                # A resumption handle the server will not accept — expired, or
-                # belonging to a session it has since dropped. Without this, the
-                # same dead handle would be replayed on every retry and the
-                # assistant would never come back at all: the feature meant to
-                # survive a reconnect would be the thing preventing one. Drop it
-                # once and let the next attempt start clean.
-                if _resumed_with and (
-                    "resum" in str(e).lower()
-                    or "handle" in str(e).lower()
-                    or "INVALID_ARGUMENT" in str(e)
-                    or "NOT_FOUND" in str(e)
-                ):
-                    print("[JARVIS] 🔗 Resumption handle rejected — starting a fresh session")
-                    self.ui.write_log("SYS: Could not restore the conversation — starting fresh.")
-                    self._resume_handle = None
-                    self._conn_backoff = 0
-                    continue
-
-                err_str = str(e)
-                print(f"[JARVIS] Error ({type(e).__name__}): {e}")
-                traceback.print_exc()
-
-                # Out of quota, or this model is not available to this key —
-                # step down the ladder and reconnect straight away. This is the
-                # difference between "JARVIS is quieter today" and "JARVIS does
-                # not start today": one model means one daily limit, and the
-                # limit always arrives mid-conversation.
-                if _gemini.note_live_failure(live_model, err_str):
-                    nxt = _gemini.live_model()
-                    self.ui.write_log(
-                        f"SYS: Switching to {nxt.split('/')[-1]} — the previous "
-                        f"model is out of quota."
-                        if nxt != live_model else
-                        "SYS: Every live model is rate-limited — retrying.")
-                    self._conn_backoff = 0 if nxt != live_model else 15
-                    if nxt == live_model:
-                        await asyncio.sleep(self._conn_backoff)
-                    continue
-
-                # Turn-taking / media / thinking knobs rejected by the server
-                # (preview API drift) — drop them first, because they are the
-                # newest fields and the cheapest to lose. Proactive audio is
-                # tried again on the next pass if the error persists.
-                if self._tuned_live and (
-                    "INVALID_ARGUMENT" in err_str
-                    or "Unknown name" in err_str
-                    or "unexpected keyword" in err_str
-                    or "realtime_input" in err_str.lower()
-                    or "media_resolution" in err_str.lower()
-                    or "thinking" in err_str.lower()
-                ):
-                    self._tuned_live = False
-                    print("[JARVIS] Live tuning rejected — reconnecting without it.")
-                    continue
-
-                # Proactive audio rejected by the server (preview API drift) —
-                # drop it and reconnect with the plain config.
-                if self._enhanced_live and (
-                    "INVALID_ARGUMENT" in err_str
-                    or "proactiv" in err_str.lower()
-                    or "Unknown name" in err_str
-                    or "unexpected keyword" in err_str
-                ):
-                    self._enhanced_live = False
-                    self.ui.write_log(
-                        "SYS: Proactive audio unavailable — reconnecting without it."
-                    )
-                    continue
-
-                # Invalid API key — stop hammering the API, prompt re-configuration
-                if "API key not valid" in err_str or "1007" in err_str:
-                    self.ui.write_log("ERR: API key invalid — please re-enter your key.")
-                    self.ui.set_state("SLEEPING")
-                    self.ui.prompt_reconfig()
-                    while not self.ui._win._ready:
-                        await asyncio.sleep(1)
-                    print("[JARVIS] New API key saved — reconnecting...")
-                    _conn_backoff = 3
-                    continue
-
-                # Network / timeout errors — log clearly and back off
-                is_net_err = any(k in err_str for k in (
-                    "TimeoutError", "timed out", "getaddrinfo", "CancelledError",
-                    "ConnectionRefusedError", "OSError", "Cannot connect",
-                ))
-                if is_net_err:
-                    _conn_backoff = min(getattr(self, "_conn_backoff", 3) * 2, 60)
-                    self._conn_backoff = _conn_backoff
-                    self.ui.write_log(
-                        f"NET: Connection failed — retrying in {_conn_backoff}s. "
-                        "(a VPN may be required)"
-                    )
-                else:
-                    self._conn_backoff = 3
-            finally:
-                self.session = None
-                # Only save if there was a real conversation (≥3 turns)
-                if len(self._session_log) >= 3:
-                    asyncio.create_task(self._save_session_summary())
-
-            self.set_speaking(False)
+        from core.local_ai import LocalAI
+        probe = LocalAI()
+        if not await asyncio.to_thread(probe.health):
+            self.ui.write_log(
+                "ERR: llama-server não está disponível em " + probe.base_url
+            )
             self.ui.set_state("SLEEPING")
+            return
 
-            if self._dashboard:
-                await self._dashboard.broadcast({"type": "status", "state": "sleeping"})
+        self.session = LocalSession(system_prompt, all_decls)
+        self.audio_in_queue = asyncio.Queue()
+        self.out_queue = asyncio.Queue(maxsize=1)
+        self._turn_done_event = asyncio.Event()
+        self._awake = True
+        self.ui.set_state("LISTENING")
+        self.ui.write_log(
+            "SYS: JARVIS online — IA local via llama.cpp. Nenhuma chave local AI é usada."
+        )
 
-            delay = getattr(self, "_conn_backoff", 3)
-            print(f"[JARVIS] Reconnecting in {delay}s...")
-            await asyncio.sleep(delay)
+        try:
+            await asyncio.gather(
+                self._receive_audio(),
+                self._listen_local_audio(),
+                self._run_system_monitor(),
+                self._run_background_monitor(),
+                self._run_proactive_mode(),
+                self._run_sleep_watch(),
+            )
+        finally:
+            if self.session:
+                await self.session.close()
+            self.session = None
+
+    async def _receive_audio(self):
+        """Consume local llama.cpp responses, execute tools, and speak replies locally."""
+        if not self.session:
+            return
+
+        while self.session and not self.session.closed:
+            try:
+                response = await self.session.receive()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.ui.write_log(f"ERR: Local receive: {e}")
+                await asyncio.sleep(0.2)
+                continue
+
+            # LocalSession emits function calls in the same shape the old
+            # receive loop expected from the Live API.
+            tool_call = getattr(response, "tool_call", None)
+            if tool_call is not None:
+                calls = getattr(tool_call, "function_calls", []) or []
+                results = []
+                for fc in calls:
+                    try:
+                        results.append(await self._execute_tool(fc))
+                    except Exception as e:
+                        print(f"[JARVIS] Tool execution error: {e}")
+                        traceback.print_exc()
+                        results.append(SimpleNamespace(
+                            id=getattr(fc, "id", ""),
+                            name=getattr(fc, "name", ""),
+                            response={"result": f"Tool failed: {e}"},
+                        ))
+                if self.session and results:
+                    await self.session.send_tool_response(results)
+                continue
+
+            server_content = getattr(response, "server_content", None)
+            if server_content is None:
+                continue
+
+            output = getattr(server_content, "output_transcription", None)
+            text = _clean_transcript(getattr(output, "text", "") if output else "")
+            if text:
+                self._session_log.append(f"JARVIS: {text}")
+                self.ui.write_log(f"JARVIS: {text}")
+                self.ui.set_state("SPEAKING")
+                try:
+                    # Report which local TTS path is configured before speaking.
+                    # Piper is selected when its executable and model are available;
+                    # otherwise speak_local() falls back to the system TTS.
+                    import os
+                    import shutil
+                    piper_bin = os.getenv("MARK_LIV_PIPER_BIN") or shutil.which("piper")
+                    piper_model = os.getenv("MARK_LIV_PIPER_MODEL")
+                    piper_ready = bool(
+                        piper_bin
+                        and piper_model
+                        and Path(piper_model).exists()
+                    )
+                    self.ui.write_log("TTS: Piper" if piper_ready else "TTS: fallback")
+                    await asyncio.to_thread(speak_local, text)
+                except Exception as e:
+                    self.ui.write_log(f"ERR: TTS local: {e}")
+                finally:
+                    if self.session and not self.ui.muted:
+                        self.ui.set_state("LISTENING")
+
+            if getattr(server_content, "turn_complete", False):
+                self._turn_done_event.set()
+
+    async def _listen_local_audio(self):
+        """Capture microphone audio locally and transcribe with whisper.cpp."""
+        from core.local_stt import LocalMic, transcribe
+
+        mic = LocalMic(
+            wake_enabled=self._wake_enabled,
+            wake_detector=self._wake_detector,
+            awake=self._awake,
+        )
+        try:
+            name = await asyncio.to_thread(mic.open)
+            self.ui.write_log(f"SYS: Microfone local ativo: {name or 'sistema padrão'}")
+            while self.session:
+                mic.awake = self._awake
+                mic.wake_enabled = self._wake_enabled
+
+                if self._ptt_enabled and not self._ptt_held:
+                    await asyncio.sleep(0.05)
+                    continue
+
+                pcm = await asyncio.to_thread(mic.read_segment)
+                if not pcm or not self.session:
+                    continue
+
+                try:
+                    text = await asyncio.to_thread(transcribe, pcm)
+                except Exception as e:
+                    self.ui.write_log(f"ERR: STT local: {e}")
+                    continue
+
+                text = " ".join(text.split()).strip()
+                if not text:
+                    continue
+
+                self._last_user_speech = time.monotonic()
+                self.ui.set_audio_level(0.0)
+                self.ui.write_log(f"STT local: {text}")
+
+                # Everything after transcription remains inside the machine:
+                # LocalSession -> llama serve -> local tools.
+                await self.session.send_client_content(
+                    turns={"role": "user", "parts": [{"text": text}]},
+                    turn_complete=True,
+                )
+        finally:
+            await asyncio.to_thread(mic.close)
+
+    async def run(self):
+        # Local-only runtime.
+        await self._run_local()    async def run(self):
+        await self._run_local()
+
 
 def main():
+    headless = (
+        "--cli" in sys.argv
+        or os.environ.get("MARK_LIV_CLI", "").strip() == "1"
+        or (
+            _platform.system() == "Linux"
+            and not os.environ.get("DISPLAY")
+            and not os.environ.get("WAYLAND_DISPLAY")
+        )
+    )
+    if headless:
+        from cli import main as cli_main
+        cli_main()
+        return
+
     ui = JarvisUI("face.png")
 
     def runner():
-        ui.wait_for_api_key()
         jarvis = JarvisLive(ui)
         try:
             asyncio.run(jarvis.run())
         except KeyboardInterrupt:
             print("\n🔴 Shutting down...")
+        except Exception as e:
+            print(f"[JARVIS] Fatal: {e}")
+            traceback.print_exc()
 
     threading.Thread(target=runner, daemon=True).start()
     ui.root.mainloop()
 
-if __name__ == "__main__":
-    main()
-=======
-"""Mark-LIV CLI entry point. The graphical UI is no longer used."""
-
-from cli import main
-
 
 if __name__ == "__main__":
     main()
->>>>>>> refs/remotes/origin/main

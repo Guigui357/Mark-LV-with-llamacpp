@@ -6,14 +6,14 @@
 # upper bound stops the next MAJOR release of a dependency from breaking every
 # fresh clone on the day it ships. Minor and patch updates flow in freely.
 
-# ── Core: UI, audio, Gemini Live ──────────────────────────────────────────────
+# ── Core: UI, audio, local AI ───────────────────────────────────────────────
 # PyQt6 and numpy also carry the holographic avatar: the head is rendered in
 # software with QPainter and posed with numpy, so the face costs no extra
 # package, no OpenGL and no GPU. Nothing below was added for it.
 PyQt6>=6.6,<7
 sounddevice>=0.4,<1
 numpy>=1.24,<3
-google-genai>=2.8.0,<3
+piper-tts
 
 # ── Web search & browser control ──────────────────────────────────────────────
 requests>=2.31,<3
