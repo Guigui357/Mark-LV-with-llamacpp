@@ -1126,19 +1126,9 @@ class JarvisLive:
         )
 
     async def _send_realtime(self):
-        while True:
-            msg = await self.out_queue.get()
-            # Gemini 3.x Live rejects the old realtime_input.media_chunks field
-            # (what `media=...` maps to) and closes the socket with a 1007. Send
-            # mic / phone PCM through the new `audio` field instead. Queue items
-            # are {"data": <bytes>, "mime_type": <str>} from _listen_audio and
-            # the phone relay.
-            await self.session.send_realtime_input(
-                audio=types.Blob(
-                    data=msg["data"],
-                    mime_type=msg.get("mime_type", "audio/pcm"),
-                )
-            )
+        raise RuntimeError(
+            "Realtime Gemini audio is disabled in local mode; use whisper.cpp STT and local TTS."
+        )
 
     async def _listen_audio(self):
         print("[JARVIS] 🎤 Mic started")
