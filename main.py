@@ -41,6 +41,7 @@ import time
 import json
 import sys
 import traceback
+from types import SimpleNamespace
 from datetime import datetime
 from pathlib import Path
 
