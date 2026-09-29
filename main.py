@@ -45,9 +45,9 @@ from datetime import datetime
 from pathlib import Path
 
 import sounddevice as sd
+from core.local_session import LocalSession
+from core.local_ai import LocalAI, local_model, local_tts_backend, speak_local
 import numpy as np
-from google import genai
-from google.genai import types
 from ui import JarvisUI
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
