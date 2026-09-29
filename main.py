@@ -2042,8 +2042,6 @@ class JarvisLive:
             await asyncio.to_thread(mic.close)
 
     async def run(self):
-        # Local-only runtime.
-        await self._run_local()    async def run(self):
         await self._run_local()
 
 
