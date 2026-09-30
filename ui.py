@@ -1515,7 +1515,7 @@ class SetupOverlay(QWidget):
 
     def _submit(self):
         url = self._key_input.text().strip().rstrip("/")
-        if not key:
+        if not url:
             self._key_input.setStyleSheet(
                 self._key_input.styleSheet() +
                 f" QLineEdit {{ border: 1px solid {C.RED}; }}"
