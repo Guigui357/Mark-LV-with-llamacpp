@@ -1430,11 +1430,16 @@ class SetupOverlay(QWidget):
         sep.setStyleSheet(f"color: {C.BORDER};"); layout.addWidget(sep)
         layout.addSpacing(4)
 
-        layout.addWidget(_lbl("GEMINI API KEY", 8, color=C.TEXT_DIM,
+        layout.addWidget(_lbl("LOCAL API URL", 8, color=C.TEXT_DIM,
                                align=Qt.AlignmentFlag.AlignLeft))
         self._key_input = QLineEdit()
-        self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self._key_input.setPlaceholderText("AIza…")
+        self._key_input.setPlaceholderText("http://127.0.0.1:8080/v1")
+        try:
+            existing_url = _read_full_config().get("local_ai_url", "")
+            if existing_url:
+                self._key_input.setText(str(existing_url))
+        except Exception:
+            pass
         self._key_input.setFont(QFont("Courier New", 10))
         self._key_input.setFixedHeight(32)
         self._key_input.setStyleSheet(f"""
@@ -1509,14 +1514,14 @@ class SetupOverlay(QWidget):
                 """)
 
     def _submit(self):
-        key = self._key_input.text().strip()
+        url = self._key_input.text().strip().rstrip("/")
         if not key:
             self._key_input.setStyleSheet(
                 self._key_input.styleSheet() +
                 f" QLineEdit {{ border: 1px solid {C.RED}; }}"
             )
             return
-        self.done.emit(key, self._sel_os)
+        self.done.emit(url, self._sel_os)
 
 
 class HueWheel(QWidget):
@@ -5555,7 +5560,7 @@ class MainWindow(QMainWindow):
         if not API_FILE.exists(): return False
         try:
             d = json.loads(API_FILE.read_text(encoding="utf-8"))
-            return bool(d.get("gemini_api_key")) and bool(d.get("os_system"))
+            return bool(d.get("local_ai_url")) and bool(d.get("os_system"))
         except Exception:
             return False
 
@@ -5572,10 +5577,10 @@ class MainWindow(QMainWindow):
         ov.show()
         self._overlay = ov
 
-    def _on_setup_done(self, key: str, os_name: str):
+    def _on_setup_done(self, url: str, os_name: str):
         os.makedirs(CONFIG_DIR, exist_ok=True)
         API_FILE.write_text(
-            json.dumps({"gemini_api_key": key, "os_system": os_name}, indent=4),
+            json.dumps({"local_ai_url": url, "os_system": os_name}, indent=4),
             encoding="utf-8",
         )
         self._ready = True
@@ -5793,7 +5798,7 @@ class JarvisUI:
                                    list(findings or []), list(unclear or []))
 
     def prompt_reconfig(self):
-        """Thread-safe: show the API key setup overlay (e.g. after an auth error)."""
+        """Thread-safe: show the local API URL setup overlay."""
         self._win._ready = False
         self._win._reconfig_sig.emit()
 
