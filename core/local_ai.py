@@ -6,6 +6,8 @@ import os
 import platform
 import shutil
 import subprocess
+import tempfile
+import wave
 from pathlib import Path
 from typing import Any
 import threading
