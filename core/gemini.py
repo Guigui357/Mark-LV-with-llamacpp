@@ -74,7 +74,7 @@ def _messages(contents):
 
 def call(contents,tier=FAST,config=None,timeout_ms=DEFAULT_TIMEOUT_MS,key=""):
     limits={FAST:384,SMART:768,SEARCH:768,LIVE:768}
-    raw=LocalAI().chat(_messages(contents),None,0.2,limits.get(tier,768),timeout_ms)
+    raw=LocalAI().chat(_messages(contents),None,0.2,limits.get(tier,768))
     return _Response(raw)
 
 def text(contents,tier=FAST,config=None,timeout_ms=DEFAULT_TIMEOUT_MS,key="",default=""):
