@@ -136,10 +136,7 @@ class MarkLIV:
             if text:
                 self.logs.append("JARVIS: "+text)
                 print(f"\nJARVIS> {text}", flush=True)
-                pbin = os.getenv("MARK_LIV_PIPER_BIN") or shutil.which("piper")
-                pmodel = os.getenv("MARK_LIV_PIPER_MODEL")
-                piper = bool(pbin and pmodel and Path(pmodel).exists())
-                print("[TTS: Piper]" if piper else "[TTS: fallback]", flush=True)
+                print(f"[TTS: {local_tts_backend()}]", flush=True)
                 try:
                     if not os.getenv("MARK_LIV_NO_TTS"): await asyncio.to_thread(speak_local, text)
                 except Exception as e: print(f"[ERRO] TTS: {e}", flush=True)
