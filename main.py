@@ -1975,16 +1975,7 @@ class JarvisLive:
                     # Report which local TTS path is configured before speaking.
                     # Piper is selected when its executable and model are available;
                     # otherwise speak_local() falls back to the system TTS.
-                    import os
-                    import shutil
-                    piper_bin = os.getenv("MARK_LIV_PIPER_BIN") or shutil.which("piper")
-                    piper_model = os.getenv("MARK_LIV_PIPER_MODEL")
-                    piper_ready = bool(
-                        piper_bin
-                        and piper_model
-                        and Path(piper_model).exists()
-                    )
-                    self.ui.write_log("TTS: Piper" if piper_ready else "TTS: fallback")
+                    self.ui.write_log(f"TTS: {local_tts_backend()}")
                     await asyncio.to_thread(speak_local, text)
                 except Exception as e:
                     self.ui.write_log(f"ERR: TTS local: {e}")
