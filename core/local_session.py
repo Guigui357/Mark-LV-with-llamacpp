@@ -112,7 +112,7 @@ class LocalSession:
                 scored.append((score, d))
 
         scored.sort(key=lambda item: item[0], reverse=True)
-        return [d for _, d in scored[:10]]
+        return [d for _, d in scored[:6]]
 
     @staticmethod
     def _content(turns: Any) -> str | list:
