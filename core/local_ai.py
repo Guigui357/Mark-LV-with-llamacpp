@@ -33,9 +33,22 @@ def load_config() -> dict:
         return {}
 
 
+def normalize_local_url(value: str) -> str:
+    """Accept 127.0.0.1:8080 and normalize it to llama.cpp's /v1 API."""
+    value = str(value or "").strip().rstrip("/")
+    if not value:
+        return "http://127.0.0.1:8080/v1"
+    if "://" not in value:
+        value = "http://" + value
+    if not value.endswith("/v1"):
+        value += "/v1"
+    return value
+
+
 def local_url() -> str:
     cfg = load_config()
-    return str(cfg.get("local_ai_url") or os.getenv("MARK_LIV_LLM_URL") or "http://127.0.0.1:8080/v1").rstrip("/")
+    raw = str(cfg.get("local_ai_url") or os.getenv("MARK_LIV_LLM_URL") or "127.0.0.1:8080")
+    return normalize_local_url(raw)
 
 
 def local_model() -> str:
@@ -91,7 +104,7 @@ class LocalAI:
     """Small HTTP client for llama.cpp's OpenAI-compatible local API."""
 
     def __init__(self, base_url: str | None = None, model: str | None = None):
-        self.base_url = (base_url or local_url()).rstrip("/")
+        self.base_url = normalize_local_url(base_url or local_url())
         self.model = model or local_model()
         self.session = requests.Session()
 
