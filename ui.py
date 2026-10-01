@@ -1433,7 +1433,7 @@ class SetupOverlay(QWidget):
         layout.addWidget(_lbl("LOCAL API URL", 8, color=C.TEXT_DIM,
                                align=Qt.AlignmentFlag.AlignLeft))
         self._key_input = QLineEdit()
-        self._key_input.setPlaceholderText("http://127.0.0.1:8080/v1")
+        self._key_input.setPlaceholderText("127.0.0.1:8080")
         try:
             existing_url = _read_full_config().get("local_ai_url", "")
             if existing_url:
